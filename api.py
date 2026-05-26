@@ -2,6 +2,7 @@ import os
 import time
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 import httpx
 import uvicorn
 from google import genai
@@ -11,14 +12,13 @@ from db_config import HEADERS, URL_SUPABASE, buscar_ultima_orientacao, salvar_ta
 GEMINI_KEY = "AIzaSyDJg_DSyJc6Gr2720ur5Ih800Zk9Lwn5VI"
 client = genai.Client(api_key=GEMINI_KEY)
 
-# Configurações da Z-API com as suas chaves reais
-ZAPI_INSTANCE = "3F3B4D01F9F3D259DE86DE142E885538"
-ZAPI_TOKEN = "A2AE9A86694FAB83B34DD6C9"
-
 app = FastAPI()
 
+# Modelo para receber as mensagens direto do site
+class MensagemWeb(BaseModel):
+    texto: str
 
-# 🌐 1ª ROTA: A página visual bonita para quem ler o QR Code
+# 🌐 1ª ROTA: O Chat Visual Lindo para conversar direto pelo navegador
 @app.get("/", response_class=HTMLResponse)
 async def pagina_inicial():
     html_content = """
@@ -27,7 +27,7 @@ async def pagina_inicial():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>MindFlow Bot</title>
+        <title>MindFlow Chat</title>
         <style>
             body {
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -39,57 +39,129 @@ async def pagina_inicial():
                 justify-content: center;
                 height: 100vh;
                 margin: 0;
-                text-align: center;
             }
-            .container {
+            .chat-container {
                 background: rgba(255, 255, 255, 0.1);
-                padding: 40px;
+                padding: 20px;
                 border-radius: 20px;
                 backdrop-filter: blur(10px);
                 box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
                 max-width: 500px;
                 width: 90%;
+                height: 70vh;
+                display: flex;
+                flex-direction: column;
             }
             h1 {
-                font-size: 2.5rem;
-                margin-bottom: 10px;
-                letter-spacing: 2px;
+                font-size: 1.8rem;
+                margin: 0 0 15px 0;
+                text-align: center;
+                letter-spacing: 1px;
             }
-            p {
-                font-size: 1.2rem;
-                opacity: 0.9;
-                margin-bottom: 30px;
-                line-height: 1.5;
-            }
-            .btn-whatsapp {
-                background-color: #25D366;
-                color: white;
-                text-decoration: none;
-                padding: 15px 30px;
-                border-radius: 50px;
-                font-weight: bold;
-                font-size: 1.1rem;
-                display: inline-flex;
-                align-items: center;
+            .chat-box {
+                flex: 1;
+                background: rgba(0, 0, 0, 0.2);
+                border-radius: 10px;
+                padding: 15px;
+                overflow-y: auto;
+                margin-bottom: 15px;
+                display: flex;
+                flex-direction: column;
                 gap: 10px;
-                transition: transform 0.2s, background-color 0.2s;
-                box-shadow: 0 4px 15px rgba(37, 211, 102, 0.4);
+                text-align: left;
             }
-            .btn-whatsapp:hover {
-                transform: scale(1.05);
-                background-color: #20ba5a;
+            .message {
+                padding: 10px 15px;
+                border-radius: 15px;
+                max-width: 80%;
+                line-height: 1.4;
+            }
+            .user-msg {
+                background-color: #0076ff;
+                align-self: flex-end;
+            }
+            .bot-msg {
+                background-color: #34c759;
+                align-self: flex-start;
+            }
+            .input-area {
+                display: flex;
+                gap: 10px;
+            }
+            input {
+                flex: 1;
+                padding: 12px;
+                border: none;
+                border-radius: 25px;
+                outline: none;
+                font-size: 1rem;
+            }
+            button {
+                background-color: #0076ff;
+                color: white;
+                border: none;
+                padding: 0 20px;
+                border-radius: 25px;
+                font-weight: bold;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+            button:hover {
+                background-color: #0056b3;
             }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>🧠 MindFlow</h1>
-            <p>Bem-vindo ao futuro do atendimento inteligente. Meu assistente virtual integrado ao Gemini IA está pronto para apoiar e destravar o seu foco!</p>
-            
-            <a href="https://wa.me/5511999999999" target="_blank" class="btn-whatsapp">
-                💬 Fale Comigo no WhatsApp
-            </a>
+        <div class="chat-container">
+            <h1>🧠 MindFlow Chat</h1>
+            <div class="chat-box" id="chatBox">
+                <div class="message bot-msg">Olá! Sou o MindFlow. Me conte o que está te travando hoje para organizarmos seus passos?</div>
+            </div>
+            <div class="input-area">
+                <input type="text" id="userInput" placeholder="Digite seu desabafo aqui..." onkeypress="verificarEnter(event)">
+                <button onclick="enviarMensagem()">Enviar</button>
+            </div>
         </div>
+
+        <script>
+            function verificarEnter(event) {
+                if (event.key === 'Enter') enviarMensagem();
+            }
+
+            async function enviarMensagem() {
+                const input = document.getElementById('userInput');
+                const texto = input.value.trim();
+                if (!texto) return;
+
+                const chatBox = document.getElementById('chatBox');
+                
+                // Mostrar mensagem do usuário na tela
+                chatBox.innerHTML += `<div class="message user-msg">${texto}</div>`;
+                input.value = '';
+                chatBox.scrollTop = chatBox.scrollHeight;
+
+                // Mostrar balão de "Pensando..."
+                const pensandoId = 'pensando_' + Date.now();
+                chatBox.innerHTML += `<div class="message bot-msg" id="${pensandoId}">🧠 Pensando...</div>`;
+                chatBox.scrollTop = chatBox.scrollHeight;
+
+                try {
+                    // Envia direto para o nosso servidor no Render
+                    const response = await fetch('/conversar-web', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ texto: texto })
+                    });
+                    const dados = await response.json();
+                    
+                    // Substitui o "Pensando..." pela resposta real da IA
+                    document.getElementById(pensandoId).innerText = dados.resposta;
+                } catch (error) {
+                    document.getElementById(pensandoId).innerText = "Ops, deu um erro ao conectar.";
+                }
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        </script>
     </body>
     </html>
     """
@@ -100,7 +172,7 @@ def chamar_gemini_com_memoria(desabafo, ultima_orientacao):
     instrucoes_tdah = """
     Você é o assistente do MindFlow para pessoas com TDAH que estão travadas.
     Identifique a ÚNICA tarefa principal que ele deve focar agora e dê até 3 micro-passos simples.
-    Responda em português de forma curta e acolhedora, perfeita para ler no WhatsApp.
+    Responda em português de forma curta e acolhedora.
     """
     contexto = f"{instrucoes_tdah}\n"
     if ultima_orientacao:
@@ -118,26 +190,16 @@ def chamar_gemini_com_memoria(desabafo, ultima_orientacao):
     return "Ops, o servidor do Google balançou. Tente enviar novamente!"
 
 
-# --- 2ª ROTA: CONEXÃO COM A Z-API ---
-@app.post("/whatsapp")
-async def receber_mensagem_whatsapp(request: Request):
+# 🚀 2ª ROTA: O motor que processa as mensagens vindas DIRETO do site
+@app.post("/conversar-web")
+async def conversar_web(dados: MensagemWeb):
     try:
-        # 1. Recebendo o JSON enviado pela Z-API
-        dados = await request.json()
-
-        # Extraindo o texto da mensagem e o número de quem enviou
-        mensagem = dados.get("text", {}).get("message", "")
-        chat_id = dados.get("phone", "")
-
-        if not mensagem.strip():
-            return {"status": "Mensagem vazia ignorada"}
-
-        print(f"\n📱 MENSAGEM RECEBIDA: '{mensagem}' do número {chat_id}")
-
-        # 2. Busca a memória do passado no Supabase
+        mensagem = dados.texto
+        
+        # 1. Busca a memória do passado no Supabase
         ultima_orientacao = buscar_ultima_orientacao()
 
-        # 3. Salva a nova mensagem que chegou no banco
+        # 2. Salva a nova mensagem que chegou no banco
         salvar_tarefa(titulo=mensagem, status="pendente")
 
         # Pegamos o ID mais recente criado para atualizar depois
@@ -145,10 +207,10 @@ async def receber_mensagem_whatsapp(request: Request):
         res_id = httpx.get(url_id, headers=HEADERS).json()
         id_real = res_id[0]["id"]
 
-        # 4. Chama o Gemini usando a memória
+        # 3. Chama o Gemini usando a memória
         resposta_da_ia = chamar_gemini_com_memoria(mensagem, ultima_orientacao)
 
-        # 5. Atualiza o banco com a resposta final da IA
+        # 4. Atualiza o banco com a resposta final da IA
         url_patch = f"{URL_SUPABASE}/rest/v1/tarefas?id=eq.{id_real}"
         httpx.patch(
             url_patch,
@@ -156,17 +218,10 @@ async def receber_mensagem_whatsapp(request: Request):
             json={"titulo": resposta_da_ia, "status": "resolvido"},
         )
 
-        # 6. ENVIAR A RESPOSTA DE VOLTA PARA O WHATSAPP DO USUÁRIO
-        url_zapi = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}/send-text"
-        payload_zapi = {"phone": chat_id, "message": resposta_da_ia}
-        httpx.post(url_zapi, json=payload_zapi)
-        print("🧠 RESPOSTA DO GEMINI ENVIADA PRO CELULAR!")
-
-        return {"status": "Sucesso"}
+        return {"resposta": resposta_da_ia}
 
     except Exception as e:
-        print(f"❌ Erro ao processar: {e}")
-        return {"status": "Erro", "detalhe": str(e)}
+        return {"resposta": f"Erro ao processar: {str(e)}"}
 
 
 if __name__ == "__main__":
